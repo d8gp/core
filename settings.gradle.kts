@@ -18,6 +18,8 @@ rootProject.name = "d8gp-core"
 
 include(
     ":matrix",
+    ":matrix-models",
+    ":remote-protocol",
     ":plugin-protocol",
     ":ios-framework",
 )

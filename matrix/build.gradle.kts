@@ -13,7 +13,7 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            api(libs.kotlinx.serialization.json)
+            api(project(":matrix-models"))
             api(libs.kotlinx.coroutines.core)
             api(libs.trixnity.client)
             implementation(libs.trixnity.client.cryptodriver.vodozemac)

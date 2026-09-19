@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "d8gp-core"
 
 include(
+    ":matrix",
     ":plugin-protocol",
     ":ios-framework",
 )

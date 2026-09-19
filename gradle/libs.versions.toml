@@ -1,10 +1,16 @@
-# Kotlin, coroutines and serialization match d8gp-app-android exactly: both
-# builds meet in one classpath through includeBuild.
+# Kotlin 2.3.21 is required by Trixnity 5.x (the Matrix SDK). d8gp-app-android
+# is still on 2.2.20 and must bump before it consumes :matrix through
+# includeBuild - a newer-Kotlin library cannot be read by an older compiler.
 [versions]
-kotlin = "2.2.20"
+kotlin = "2.3.21"
 coroutines = "1.10.2"
 serializationJson = "1.8.1"
 atomicfu = "0.29.0"
+trixnity = "5.9.2"
+ktor = "3.3.2"
+exposed = "1.4.0"
+h2 = "2.4.240"
+r2dbcH2 = "1.0.0.RELEASE"
 
 [libraries]
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -12,6 +18,14 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serializationJson" }
 atomicfu = { group = "org.jetbrains.kotlinx", name = "atomicfu", version.ref = "atomicfu" }
 kotlin-test = { group = "org.jetbrains.kotlin", name = "kotlin-test", version.ref = "kotlin" }
+trixnity-client = { module = "de.connect2x.trixnity:trixnity-client", version.ref = "trixnity" }
+trixnity-client-repository-exposed = { module = "de.connect2x.trixnity:trixnity-client-repository-exposed", version.ref = "trixnity" }
+trixnity-client-media-okio = { module = "de.connect2x.trixnity:trixnity-client-media-okio", version.ref = "trixnity" }
+trixnity-client-cryptodriver-vodozemac = { module = "de.connect2x.trixnity:trixnity-client-cryptodriver-vodozemac", version.ref = "trixnity" }
+ktor-client-java = { module = "io.ktor:ktor-client-java", version.ref = "ktor" }
+exposed-r2dbc = { module = "org.jetbrains.exposed:exposed-r2dbc", version.ref = "exposed" }
+h2 = { module = "com.h2database:h2", version.ref = "h2" }
+r2dbc-h2 = { module = "io.r2dbc:r2dbc-h2", version.ref = "r2dbcH2" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

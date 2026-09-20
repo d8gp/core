@@ -6,7 +6,7 @@ plugins {
 
 // The one framework the iOS app links. Every shared module is exported here so
 // Swift sees its public API directly; add new modules to `exported`.
-val exported = listOf(":plugin-protocol")
+val exported = listOf(":plugin-protocol", ":matrix-models", ":remote-protocol")
 
 kotlin {
     val xcframework = XCFramework("D8gpCore")

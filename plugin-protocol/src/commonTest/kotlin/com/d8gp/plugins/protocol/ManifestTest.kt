@@ -4,6 +4,7 @@ import com.d8gp.plugins.protocol.connections.VectorReport
 import com.d8gp.plugins.protocol.connections.VectorsGenerated
 import com.d8gp.plugins.protocol.connections.text
 import com.d8gp.plugins.protocol.connections.vectorList
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -371,7 +372,7 @@ class ManifestTest {
             parseManifest("not json")
             fail()
         } catch (e: ManifestException) {
-            assertEquals("manifest.: must be a JSON object", e.message)
+            assertEquals("manifest.: must be JSON nested at most 64 levels (not-json)", e.message)
         }
         assertFalse(isValidManifest("not json"))
     }
@@ -579,6 +580,12 @@ class ManifestTest {
         }
     }
 
+    // What a lenient reader makes of a text that is not JSON. parseManifest
+    // refuses such a text, but a caller may hand over an element it read itself.
+    private fun parseLeniently(text: String): PluginManifest = parseManifest(Json.parseToJsonElement(text))
+
+    private val notJsonAtTheRoot = "manifest.: must be JSON nested at most 64 levels (not-json)"
+
     @Test
     fun `a literal outside the json number grammar is no integer`() {
         val consumer = ProtocolJson.encodeToString(JsonObject.serializer(), connectorManifest("ok/consumer"))
@@ -586,6 +593,12 @@ class ManifestTest {
         for (literal in listOf("1d", "1f", "0x1p0", "01", "+1", "1.", "NaN")) {
             assertEquals(
                 "manifest.capabilities[0].version: must be an integer of at least 1",
+                assertFailsWith<ManifestException>(literal) {
+                    parseLeniently(consumer.replace(""""version":1,""", """"version":$literal,"""))
+                }.message,
+            )
+            assertEquals(
+                notJsonAtTheRoot,
                 assertFailsWith<ManifestException>(literal) {
                     parseManifest(consumer.replace(""""version":1,""", """"version":$literal,"""))
                 }.message,
@@ -598,7 +611,9 @@ class ManifestTest {
         val text = ProtocolJson.encodeToString(JsonObject.serializer(), base())
         fun errorOfText(from: String, to: String): String {
             assertTrue(from in text, from)
-            return assertFailsWith<ManifestException>(to) { parseManifest(text.replace(from, to)) }.message!!
+            val edited = text.replace(from, to)
+            assertEquals(notJsonAtTheRoot, assertFailsWith<ManifestException>(to) { parseManifest(edited) }.message)
+            return assertFailsWith<ManifestException>(to) { parseLeniently(edited) }.message!!
         }
 
         for (literal in listOf("01", "1.", "+1", "1d", "1f", ".1e1", "0x1", "NaN")) {
@@ -629,6 +644,12 @@ class ManifestTest {
         assertTrue(""""canSend":true""" in messaging)
         assertEquals(
             "manifest.capabilities[0].capabilities.canSend: required boolean",
+            assertFailsWith<ManifestException> {
+                parseLeniently(messaging.replace(""""canSend":true""", """"canSend":TRUE"""))
+            }.message,
+        )
+        assertEquals(
+            notJsonAtTheRoot,
             assertFailsWith<ManifestException> {
                 parseManifest(messaging.replace(""""canSend":true""", """"canSend":TRUE"""))
             }.message,

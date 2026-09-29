@@ -246,7 +246,8 @@ object ConsentText {
         return lines
     }
 
-    private fun limitLines(budget: Budget, context: ConsentContext): List<String> {
+    private fun limitLines(budget: Budget?, context: ConsentContext): List<String> {
+        if (budget == null) return listOf(field("Limits", "none are set, so no call is allowed."))
         val enforcement = if (context.usageIsEstimated) {
             "Token totals for this provider are estimates; request counts and time are enforced."
         } else {

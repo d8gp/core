@@ -47,7 +47,12 @@ object ConnectionPolicy {
             else ->
                 return CallDecision.Refuse(ConnectionErrorCodes.NEEDS_RECONSENT, "the connection needs approval again")
         }
-        if (call.version != record.major) {
+        val budget = record.budget
+            ?: return CallDecision.Refuse(
+                ConnectionErrorCodes.NEEDS_RECONSENT,
+                "the connection has no approved budget",
+            )
+        if (record.major < 1 || call.version != record.major) {
             return CallDecision.Refuse(
                 ConnectionErrorCodes.VERSION_MISMATCH,
                 "the connection is for version ${record.major}",
@@ -78,7 +83,7 @@ object ConnectionPolicy {
 
         // A record with no time at all still gets a deadline the broker can
         // enforce, and the call ends as deadline-exceeded.
-        val deadlineMs = record.budget.maxCallMs.coerceIn(1, MAX_CALL_MS)
+        val deadlineMs = budget.maxCallMs.coerceIn(1, MAX_CALL_MS)
         val serve = buildJsonObject {
             put("interface", call.iface)
             put("version", call.version)

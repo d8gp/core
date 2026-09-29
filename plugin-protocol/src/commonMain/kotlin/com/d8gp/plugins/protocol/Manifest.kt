@@ -6,6 +6,8 @@ import com.d8gp.plugins.protocol.connections.isConsentSafe
 import com.d8gp.plugins.protocol.connections.isConsentText
 import com.d8gp.plugins.protocol.connections.MAX_SAFE_INTEGER
 import com.d8gp.plugins.protocol.connections.numberOrNull
+import com.d8gp.plugins.protocol.connections.StrictJson
+import com.d8gp.plugins.protocol.connections.StrictJsonException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -43,9 +45,9 @@ private const val MAX_HOSTNAME_LENGTH = 253
 
 fun parseManifest(json: String): PluginManifest {
     val root = try {
-        ProtocolJson.parseToJsonElement(json)
-    } catch (_: Exception) {
-        throw ManifestException("", "must be a JSON object")
+        StrictJson.read(json)
+    } catch (e: StrictJsonException) {
+        throw ManifestException("", "must be JSON nested at most ${StrictJson.MAX_DEPTH} levels (${e.code})")
     }
     return parseManifest(root)
 }

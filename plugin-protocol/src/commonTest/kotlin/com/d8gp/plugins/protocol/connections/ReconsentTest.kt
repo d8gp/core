@@ -242,13 +242,13 @@ class ReconsentTest {
     fun `an edit that widens the record needs the user and one that narrows it does not`() {
         assertNull(recordEditReason(record, record))
         assertNull(recordEditReason(record, record.copy(state = ConnectionStates.REVOKED, fingerprint = "f")))
-        assertNull(recordEditReason(record, record.copy(budget = record.budget.copy(requestsPerDay = 1))))
+        assertNull(recordEditReason(record, record.copy(budget = Budget(requestsPerDay = 1))))
         assertNull(recordEditReason(record, record.copy(methods = emptyList())))
         assertNull(recordEditReason(record, record.copy(onwardEgress = OnwardEgressSnapshot())))
 
         assertEquals(
             "budget was raised",
-            recordEditReason(record, record.copy(budget = record.budget.copy(requestsPerDay = 501))),
+            recordEditReason(record, record.copy(budget = Budget(requestsPerDay = 501))),
         )
         assertEquals("methods were added", recordEditReason(record, record.copy(methods = listOf("complete", "embed"))))
         assertEquals(

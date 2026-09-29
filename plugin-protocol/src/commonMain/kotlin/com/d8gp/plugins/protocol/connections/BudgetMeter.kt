@@ -175,7 +175,7 @@ class BudgetMeter(private val nowMs: () -> Long) {
         val provider = providerDays.getValue(reservation.provider to reservation.day)
         for (counters in listOf(connection, provider)) {
             counters.reservedTokens -= reservation.reservedTokens
-            counters.settledTokens = saturatingSum(counters.settledTokens, charged)
+            counters.settledTokens = minOf(saturatingSum(counters.settledTokens, charged), MAX_SAFE_INTEGER)
         }
         return Settlement(
             chargedTokens = charged,

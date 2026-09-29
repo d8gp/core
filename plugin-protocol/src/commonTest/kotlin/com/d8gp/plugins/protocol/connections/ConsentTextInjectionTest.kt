@@ -218,7 +218,7 @@ class ConsentTextInjectionTest {
                 record.copy(consumer = record.consumer.copy(net = listOf(hostile), exec = listOf(hostile))),
                 record.copy(provider = record.provider.copy(plugin = hostile, version = hostile)),
                 record.copy(provider = record.provider.copy(egress = listOf(hostile, "exec:claude"))),
-                record.copy(budget = record.budget.copy(maxTier = hostile)),
+                record.copy(budget = Budget(maxTier = hostile)),
             )
             for (changed in records) {
                 val expected = if (changed.iface == hostile) honestLines + 1 else honestLines

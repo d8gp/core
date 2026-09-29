@@ -17,7 +17,7 @@ import kotlin.test.assertTrue
 class ConnectionPolicyTest {
     @Test
     fun `matches every shared vector`() {
-        val report = VectorReport("policy.json", 103)
+        val report = VectorReport("policy.json", 140)
         for (vector in vectorList(VectorsGenerated.POLICY)) {
             val expect = vector.getValue("expect")
             val expected = if (expect is JsonObject) {
@@ -165,7 +165,7 @@ class ConnectionPolicyTest {
     @Test
     fun `the deadline is never below one millisecond`() {
         for (maxCallMs in listOf(-5L, 0L, Long.MIN_VALUE)) {
-            val record = llmRecord.copy(budget = llmRecord.budget.copy(maxCallMs = maxCallMs))
+            val record = llmRecord.copy(budget = Budget(maxCallMs = maxCallMs))
             val decision = assertIs<CallDecision.Deliver>(decide(record, call("d8gp.llm", 1, "complete", llmParams)))
             assertEquals(1, decision.deadlineMs)
             assertEquals("1", decision.serve.getValue("deadlineMs").toString())

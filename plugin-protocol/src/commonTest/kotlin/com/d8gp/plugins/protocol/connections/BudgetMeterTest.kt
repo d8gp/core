@@ -15,7 +15,7 @@ class BudgetMeterTest {
 
     @Test
     fun `matches every shared vector`() {
-        val report = VectorReport("budget.json", 72)
+        val report = VectorReport("budget.json", 88)
         for (vector in vectorList(VectorsGenerated.BUDGET)) {
             report.check(vector.text("name"), emptyList()) { disagreements(vector) }
         }

@@ -13,12 +13,12 @@ import kotlin.test.assertNull
 class StrikePolicyTest {
     @Test
     fun `matches every shared vector`() {
-        val report = VectorReport("strike-policy.json", 50)
+        val report = VectorReport("strike-policy.json", 82)
         for (vector in vectorList(VectorsGenerated.STRIKE_POLICY)) {
             val code = vector.text("code")
             val kind = vector.text("callKind")
             report.check("$kind/$code", vector.getValue("strike").jsonPrimitive.content.toBoolean()) {
-                strikeFor(code, CallKind.fromWire(kind) ?: error("unknown call kind $kind"))
+                strikeFor(code, kind)
             }
         }
         report.finish()
@@ -44,5 +44,13 @@ class StrikePolicyTest {
     @Test
     fun `an unknown call kind has no wire name`() {
         assertNull(CallKind.fromWire("job"))
+    }
+
+    @Test
+    fun `the text entry point agrees with the enumeration`() {
+        val codes = ConnectionErrorCodes.ALL + RpcErrorCodes.TIMEOUT + RpcErrorCodes.PLUGIN_ERROR
+        for (kind in CallKind.entries) {
+            for (code in codes) assertEquals(strikeFor(code, kind), strikeFor(code, kind.wire), "${kind.wire}/$code")
+        }
     }
 }

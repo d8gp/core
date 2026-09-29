@@ -5,6 +5,7 @@ package com.d8gp.plugins.protocol.connections
 import com.d8gp.plugins.protocol.ConnectorCapabilityDecl
 import com.d8gp.plugins.protocol.EXEC_EGRESS_PREFIX
 import com.d8gp.plugins.protocol.PluginManifest
+import com.d8gp.plugins.protocol.ProtocolJson
 import com.d8gp.plugins.protocol.providesInterface
 import com.d8gp.plugins.protocol.requiresInterface
 import kotlinx.serialization.EncodeDefault
@@ -16,6 +17,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.nullable
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
@@ -126,6 +128,21 @@ object BudgetSerializer : KSerializer<Budget> {
     }
 }
 
+// A stored record with no budget member, or with one that is not an object,
+// was never validly approved and is read as a record without a budget. An
+// object is a budget whatever it holds.
+object StoredBudgetSerializer : KSerializer<Budget?> {
+    override val descriptor: SerialDescriptor = BudgetSerializer.descriptor.nullable
+
+    override fun serialize(encoder: Encoder, value: Budget?) =
+        if (value == null) encoder.encodeNull() else encoder.encodeSerializableValue(BudgetSerializer, value)
+
+    override fun deserialize(decoder: Decoder): Budget? {
+        val input = decoder as? JsonDecoder ?: throw SerializationException("a budget is read from JSON only")
+        return (input.decodeJsonElement() as? JsonObject)?.let(BudgetSerializer::read)
+    }
+}
+
 // Bounds the SUM over every consumer of one provider (one key, one login).
 @Serializable(with = ProviderCapSerializer::class)
 data class ProviderCap(
@@ -224,11 +241,12 @@ data class ConnectionRecord(
     @SerialName("interface")
     val iface: String,
     @Serializable(with = ConnectionMajorSerializer::class)
-    val major: Long,
+    val major: Long = ConnectionMajorSerializer.NOT_A_MAJOR,
     val methods: List<String>,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val scope: JsonObject = JsonObject(emptyMap()),
-    val budget: Budget,
+    @Serializable(with = StoredBudgetSerializer::class)
+    val budget: Budget? = null,
     val onwardEgress: OnwardEgressSnapshot = OnwardEgressSnapshot(),
     val fingerprint: String? = null,
     // Kept as text so a state this version does not know fails closed instead
@@ -237,6 +255,11 @@ data class ConnectionRecord(
     val consent: ConnectionConsent? = null,
     val history: List<ConnectionTransition> = emptyList(),
 )
+
+// Throws StrictJsonException for a text that is not JSON or is nested too
+// deep, and SerializationException for JSON that is not a record.
+fun parseConnectionRecord(json: String): ConnectionRecord =
+    ProtocolJson.decodeFromJsonElement(ConnectionRecord.serializer(), StrictJson.read(json))
 
 private val FINGERPRINT_STRIPPED_KEYS = setOf("id", "state", "consent", "history", "fingerprint")
 private val FINGERPRINT_PARTIES = setOf("consumer", "provider")
@@ -301,10 +324,18 @@ fun recordEditReason(approved: ConnectionRecord, edited: ConnectionRecord): Stri
     edited.iface != approved.iface || edited.major != approved.major -> "interface changed"
     !approved.methods.containsAll(edited.methods) -> "methods were added"
     edited.scope != approved.scope -> "scope changed"
-    edited.budget.raises(approved.budget) -> "budget was raised"
+    budgetRaised(edited.budget, approved.budget) -> "budget was raised"
     grew(edited.onwardEgress.consumer, approved.onwardEgress.consumer) ||
         grew(edited.onwardEgress.provider, approved.onwardEgress.provider) -> "onward egress grew"
     else -> null
+}
+
+// An approved record without a budget allowed nothing, so any budget raises
+// it. An edit that takes the budget away leaves a record that is refused.
+private fun budgetRaised(edited: Budget?, approved: Budget?): Boolean = when {
+    edited == null -> false
+    approved == null -> true
+    else -> edited.raises(approved)
 }
 
 private fun consumerChange(record: ConnectionRecord, installed: InstalledParty): String? {

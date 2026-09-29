@@ -19,3 +19,8 @@ fun strikeFor(code: String, callKind: CallKind): Boolean = when (callKind) {
     CallKind.Capability -> code == RpcErrorCodes.TIMEOUT || code == RpcErrorCodes.PLUGIN_ERROR
     CallKind.Connection, CallKind.Task -> false
 }
+
+// For the call kind as the wire carries it. A kind this version does not
+// know never strikes.
+fun strikeFor(code: String, callKind: String): Boolean =
+    CallKind.fromWire(callKind)?.let { strikeFor(code, it) } ?: false

@@ -8,10 +8,10 @@ import kotlin.test.assertFailsWith
 class CanonicalJsonTest {
     @Test
     fun `matches every shared vector`() {
-        val report = VectorReport("canonical-json.json", 35)
+        val report = VectorReport("canonical-json.json", 56)
         for (vector in vectorList(VectorsGenerated.CANONICAL_JSON)) {
             val name = vector.text("name")
-            val value = vector.getValue("value")
+            val value = vector["value"] ?: parseJson(vector.text("json"))
             val error = vector.textOrNull("error")
             if (error != null) {
                 report.check(name, "error $error") {

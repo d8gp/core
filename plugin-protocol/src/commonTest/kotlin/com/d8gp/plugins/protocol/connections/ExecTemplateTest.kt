@@ -5,12 +5,16 @@ import com.d8gp.plugins.protocol.ExecDecl
 import com.d8gp.plugins.protocol.ExecStdin
 import com.d8gp.plugins.protocol.PluginManifest
 import com.d8gp.plugins.protocol.ProtocolJson
+import com.d8gp.plugins.protocol.parseManifest
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 import kotlin.test.Test
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
@@ -30,7 +34,7 @@ class ExecTemplateTest {
 
     @Test
     fun `matches every shared vector`() {
-        val report = VectorReport("exec-template.json", 50)
+        val report = VectorReport("exec-template.json", 59)
         for (vector in vectorList(VectorsGenerated.EXEC_TEMPLATE)) {
             val expect = vector.getValue("expect").jsonObject
             val expected = expect.textOrNull("error")?.let { "error $it" }
@@ -45,6 +49,44 @@ class ExecTemplateTest {
             }
         }
         report.finish()
+    }
+
+    private fun declaredInManifest(decl: JsonElement): ExecDecl {
+        val manifest = parseJson(
+            """{"manifestVersion":1,"id":"plugin-x","name":"X","version":"0.1.0",
+                "entry":{"url":"https://plugins.d8gp.example/x/bundle.js","sha256":"${"a".repeat(64)}"},
+                "capabilities":[{"type":"feed","sourceKey":"x","name":"X","icon":"i","color":"#000000"}]}""",
+        ).jsonObject
+        val permissions = JsonObject(mapOf("exec" to JsonArray(listOf(decl))))
+        return parseManifest(JsonObject(manifest + ("permissions" to permissions))).permissions.exec!!.single()
+    }
+
+    private val digestVectors = vectorList(VectorsGenerated.ARGV_DIGEST)
+
+    @Test
+    fun `the digest matches every shared vector`() {
+        val report = VectorReport("argv-digest.json", 31)
+        for (vector in digestVectors) {
+            report.check(vector.text("name"), vector.text("canonical") to vector.text("digest")) {
+                val decl = declaredInManifest(vector.getValue("decl"))
+                ExecTemplate.argvDigestInput(decl) to ExecTemplate.argvDigest(decl)
+            }
+        }
+        report.finish()
+    }
+
+    @Test
+    fun `same vectors give the digest of the base and every other vector its own`() {
+        val base = digestVectors.first { it.text("name") == "base/claude-template-from-design-1.2" }.text("digest")
+        val others = mutableSetOf(base)
+        for (vector in digestVectors) {
+            val name = vector.text("name")
+            val digest = ExecTemplate.argvDigest(declaredInManifest(vector.getValue("decl")))
+            when (name.substringBefore('/')) {
+                "base", "same" -> assertEquals(base, digest, name)
+                else -> assertTrue(others.add(digest), name)
+            }
+        }
     }
 
     @Test
@@ -78,7 +120,7 @@ class ExecTemplateTest {
     fun `the digest is the sha256 of the canonical declaration without absent fields`() {
         val canonical = """{"argv":["-p",{"flag":"--system-prompt","maxBytes":64,"slot":"system"},"--tools="],""" +
             """"binary":"claude","purpose":"Runs a helper program."}"""
-        assertEquals(canonical, CanonicalJson.encode(ProtocolJson.encodeToJsonElement(ExecDecl.serializer(), decl)))
+        assertEquals(canonical, ExecTemplate.argvDigestInput(decl))
         assertEquals("262693c2243c3bf370ab5e949b18224a11f0dcb2cf411621c679cf6a4f74fc85", ExecTemplate.argvDigest(decl))
 
         val full = decl.copy(

@@ -1,5 +1,8 @@
 package com.d8gp.plugins.protocol
 
+import com.d8gp.plugins.protocol.connections.interfaces.LlmInterface
+import com.d8gp.plugins.protocol.connections.interfaces.TaskInterface
+
 // Sign-in is needed when the plugin uses the host auth vault or runs on the
 // webview substrate (the site's own login/pairing page).
 fun needsSignIn(manifest: PluginManifest): Boolean =
@@ -19,33 +22,51 @@ private fun connectorFor(manifest: PluginManifest, role: ConnectorRole, iface: S
         .filterIsInstance<ConnectorCapabilityDecl>()
         .firstOrNull { it.role == role && it.iface == iface }
 
-// Why a manifest that parses may still not be installed as a connector, or
-// null when it may.
-fun connectorInstallRefusal(manifest: PluginManifest): String? {
+private const val WILDCARD_NET = "*"
+
+// `code` is the contract shared with the TypeScript twin. `sentence` is what
+// this host shows and may change freely.
+enum class ConnectorInstallRefusal(val code: String, val sentence: String) {
+    LlmStorage("llm-storage", "provides d8gp.llm and asks for storage"),
+    WildcardNet("wildcard-net", "provides an interface with unrestricted network"),
+    TaskExec("task-exec", "provides d8gp.task and asks to run programs"),
+}
+
+enum class NetworkInstallRefusal(val code: String, val sentence: String) {
+    WebView("webview", "runs on the WebView substrate"),
+    Auth("auth", "asks for the auth vault"),
+    Contacts("contacts", "asks for contacts"),
+    WildcardNet("wildcard-net", "asks for unrestricted network"),
+    Exec("exec", "asks to run programs on this device"),
+}
+
+// The first rule that keeps a manifest that parses from being installed as a
+// connector provider, or null when it may be.
+fun connectorInstallRefusal(manifest: PluginManifest): ConnectorInstallRefusal? {
     val provided = manifest.capabilities
         .filterIsInstance<ConnectorCapabilityDecl>()
         .filter { it.role == ConnectorRole.Provides }
+        .map { it.iface }
     if (provided.isEmpty()) return null
     val permissions = manifest.permissions
     return when {
-        permissions.net?.contains("*") == true -> "provides an interface with unrestricted network"
-        provided.any { it.iface == "d8gp.llm" } && permissions.storage == true ->
-            "provides d8gp.llm and asks for storage"
-        provided.any { it.iface == "d8gp.task" } && !permissions.exec.isNullOrEmpty() ->
-            "provides d8gp.task and asks to run programs"
+        LlmInterface.ID in provided && permissions.storage == true -> ConnectorInstallRefusal.LlmStorage
+        permissions.net.orEmpty().contains(WILDCARD_NET) -> ConnectorInstallRefusal.WildcardNet
+        TaskInterface.ID in provided && !permissions.exec.isNullOrEmpty() -> ConnectorInstallRefusal.TaskExec
         else -> null
     }
 }
 
-// Why a manifest published on D8gp Net may not be installed from there, or
-// null when it may. Network installs get the sandboxed substrate and a
-// host-bounded net allowlist only: a real WebView, the auth vault, the
-// contacts bridge, net:["*"] and running programs stay reviewed privileges.
-fun networkInstallRefusal(manifest: PluginManifest): String? = when {
-    manifest.webview != null -> "runs on the WebView substrate"
-    manifest.permissions.auth == true -> "asks for the auth vault"
-    manifest.permissions.contacts == true -> "asks for contacts"
-    manifest.permissions.net?.contains("*") == true -> "asks for unrestricted network"
-    manifest.permissions.exec?.isNotEmpty() == true -> "asks to run programs on this device"
+// The first rule that keeps a manifest published on D8gp Net from being
+// installed from there, or null when it may be. Network installs get the
+// sandboxed substrate and a host-bounded net allowlist only: a real WebView,
+// the auth vault, the contacts bridge, net:["*"] and running programs stay
+// reviewed privileges.
+fun networkInstallRefusal(manifest: PluginManifest): NetworkInstallRefusal? = when {
+    manifest.webview != null -> NetworkInstallRefusal.WebView
+    manifest.permissions.auth == true -> NetworkInstallRefusal.Auth
+    manifest.permissions.contacts == true -> NetworkInstallRefusal.Contacts
+    manifest.permissions.net.orEmpty().contains(WILDCARD_NET) -> NetworkInstallRefusal.WildcardNet
+    !manifest.permissions.exec.isNullOrEmpty() -> NetworkInstallRefusal.Exec
     else -> null
 }

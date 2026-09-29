@@ -205,6 +205,49 @@ This approval covers exactly this version of the plugin.
         assertFalse("->" in text)
     }
 
+    private fun withReason(reason: String): String = ConsentText.render(record, graph, context.copy(reason = reason))
+
+    @Test
+    fun `a value of 512 characters is shown whole`() {
+        val text = withReason("r".repeat(512))
+        assertTrue("It says why    \"${"r".repeat(512)}\"\n" in text, text)
+        assertFalse("characters)" in text, text)
+    }
+
+    @Test
+    fun `a longer value is cut after 512 characters and its true length is stated`() {
+        val text = withReason("r".repeat(512) + "s".repeat(88))
+        assertTrue("It says why    \"${"r".repeat(512)}\"... (600 characters)\n" in text, text)
+        assertFalse("s".repeat(2) in text.substringAfter("It says why").substringBefore("\n"), text)
+    }
+
+    @Test
+    fun `a value that is not quoted is cut the same way`() {
+        val long = "/" + "p".repeat(1299)
+        val text = ConsentText.renderExecGrant(grant.copy(launchPath = long, resolvedPath = null))
+        assertTrue("Program       ${long.take(512)}... (1300 characters)\n" in text, text)
+    }
+
+    @Test
+    fun `the cut counts what the value holds and not what its escapes take`() {
+        val text = withReason("\n".repeat(513))
+        assertTrue("\"${"\\u000a".repeat(512)}\"... (513 characters)\n" in text, text)
+    }
+
+    @Test
+    fun `a pair cut in half is shown as an escaped unpaired surrogate`() {
+        val text = withReason("r".repeat(511) + "\uD83D\uDE00")
+        assertTrue("\"${"r".repeat(511)}\\ud83d\"... (513 characters)\n" in text, text)
+    }
+
+    @Test
+    fun `a long value cannot push the text of the host off its line`() {
+        val short = ConsentText.renderExecGrant(grant)
+        val long = ConsentText.renderExecGrant(grant.copy(lockdownCheck = "passed ".repeat(10_000)))
+        assertEquals(short.lines().size, long.lines().size)
+        assertTrue(long.lines().all { it.length < 700 }, long)
+    }
+
     @Test
     fun `the consent hash follows the text`() {
         val text = ConsentText.render(record, graph, context)

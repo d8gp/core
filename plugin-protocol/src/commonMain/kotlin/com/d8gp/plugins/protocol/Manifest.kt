@@ -1,15 +1,15 @@
 package com.d8gp.plugins.protocol
 
 import com.d8gp.plugins.protocol.connections.integerIn
+import com.d8gp.plugins.protocol.connections.isBoolean
 import com.d8gp.plugins.protocol.connections.isConsentSafe
 import com.d8gp.plugins.protocol.connections.isConsentText
 import com.d8gp.plugins.protocol.connections.MAX_SAFE_INTEGER
+import com.d8gp.plugins.protocol.connections.numberOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.doubleOrNull
 
 // Port of plugin-host-core/manifest.ts. Hand-rolled validation (no schema
 // lib) so error messages, check ordering, and first-error semantics match the
@@ -54,7 +54,7 @@ fun parseManifest(json: JsonElement): PluginManifest {
     val obj = json as? JsonObject ?: throw ManifestException("", "must be a JSON object")
 
     // JS `=== 1` accepts any JSON number equal to 1 (1, 1.0) and nothing else.
-    val mv = (obj["manifestVersion"] as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
+    val mv = obj["manifestVersion"].numberOrNull()
     if (mv != 1.0) throw ManifestException("manifestVersion", "must be 1")
 
     val id = reqString(obj, "id", "")
@@ -133,10 +133,7 @@ private fun stringOrNull(el: JsonElement?): String? =
     (el as? JsonPrimitive)?.takeIf { it.isString }?.content
 
 private fun boolOrNull(el: JsonElement?): Boolean? =
-    (el as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-
-private fun numberOrNull(el: JsonElement?): Double? =
-    (el as? JsonPrimitive)?.takeIf { !it.isString }?.doubleOrNull
+    if (el.isBoolean()) (el as JsonPrimitive).content == "true" else null
 
 private fun reqString(obj: JsonObject, key: String, path: String): String {
     val v = stringOrNull(obj[key])
@@ -162,21 +159,16 @@ private fun optBool(obj: JsonObject, key: String, path: String): Boolean? {
     return boolOrNull(el) ?: throw ManifestException("$path$key", "must be a boolean")
 }
 
-private fun isHttpUrl(url: String): Boolean {
-    val scheme = parseScheme(url)?.lowercase()
-    return scheme == "http" || scheme == "https"
-}
-
 private fun parseEntry(v: JsonElement?): PluginEntry {
     val obj = v as? JsonObject ?: throw ManifestException("entry", "required object")
     val url = reqString(obj, "url", "entry.")
-    if (!isHttpUrl(url)) throw ManifestException("entry.url", "must be an http(s) URL")
+    if (!isManifestUrl(url)) throw ManifestException("entry.url", "must be an http(s) URL")
     val sha256 = reqString(obj, "sha256", "entry.").lowercase()
     if (!SHA256_RE.matches(sha256)) throw ManifestException("entry.sha256", "must be 64-char hex")
     val sizeEl = obj["size"]
     var size: Long? = null
     if (sizeEl != null) {
-        val n = numberOrNull(sizeEl)
+        val n = sizeEl.numberOrNull()
         if (n == null || n < 0) throw ManifestException("entry.size", "must be a non-negative number")
         size = n.toLong()
     }
@@ -187,10 +179,7 @@ private fun parseWebView(v: JsonElement?): WebViewSubstrate? {
     if (v == null) return null
     val obj = v as? JsonObject ?: throw ManifestException("webview", "must be an object")
     val url = reqString(obj, "url", "webview.")
-    // Require a real host, not just an http(s) scheme: "https:///boot" would
-    // otherwise pass and yield malformed WebView origin rules ("https://*.").
-    val host = parseStrictHost(url)
-    if (!isHttpUrl(url) || host.isNullOrBlank()) throw ManifestException("webview.url", "must be an http(s) URL")
+    if (!isManifestUrl(url)) throw ManifestException("webview.url", "must be an http(s) URL")
     val origins = optStringArray(obj, "origins", "webview.")
     if (origins.isNullOrEmpty()) throw ManifestException("webview.origins", "must be a non-empty array of strings")
     return WebViewSubstrate(url = url, origins = origins)
@@ -322,8 +311,12 @@ private fun parseExecArg(v: JsonElement, path: String, slots: MutableSet<String>
     return ExecArg.Slot(flag = flag, slot = slot, enum = enum, maxBytes = maxBytes?.toInt())
 }
 
-fun isEgressHostname(host: String): Boolean =
-    host.length <= MAX_HOSTNAME_LENGTH && host.split('.').all(HOST_LABEL_RE::matches)
+// A last label of digits only is refused, which keeps IPv4 literals out.
+fun isEgressHostname(host: String): Boolean {
+    if (host.length > MAX_HOSTNAME_LENGTH) return false
+    val labels = host.split('.')
+    return labels.all(HOST_LABEL_RE::matches) && !labels.last().all { it in '0'..'9' }
+}
 
 private fun isEgressEntry(entry: String): Boolean =
     if (entry.startsWith(EXEC_EGRESS_PREFIX)) {
@@ -341,7 +334,7 @@ private fun egressCovered(entry: String, permissions: PluginPermissions): Boolea
     if ("*" in allow) return true
     return allow.any { suffix ->
         val s = suffix.lowercase().trimStart('.')
-        entry == s || entry.endsWith(".$s")
+        '.' in s && (entry == s || entry.endsWith(".$s"))
     }
 }
 

@@ -21,15 +21,3 @@ internal actual fun parseSchemeAndHost(rawUrl: String): Pair<String, String>? {
         null
     }
 }
-
-internal actual fun parseScheme(rawUrl: String): String? = try {
-    URI(rawUrl).scheme
-} catch (_: Exception) {
-    null
-}
-
-internal actual fun parseStrictHost(rawUrl: String): String? = try {
-    URI(rawUrl).host
-} catch (_: Exception) {
-    null
-}

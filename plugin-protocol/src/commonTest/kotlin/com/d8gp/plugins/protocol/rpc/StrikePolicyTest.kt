@@ -25,10 +25,20 @@ class StrikePolicyTest {
     }
 
     @Test
-    fun `only a crashed or missing provider strikes on a brokered call`() {
-        val striking = ConnectionErrorCodes.ALL.filter { strikeFor(it, CallKind.Connection) }
-        assertEquals(listOf(ConnectionErrorCodes.PROVIDER_UNAVAILABLE), striking)
-        assertEquals(striking, ConnectionErrorCodes.ALL.filter { strikeFor(it, CallKind.Task) })
+    fun `no outcome of a brokered call strikes`() {
+        val codes = ConnectionErrorCodes.ALL + RpcErrorCodes.TIMEOUT + RpcErrorCodes.PLUGIN_ERROR
+        for (kind in listOf(CallKind.Connection, CallKind.Task)) {
+            assertEquals(emptyList(), codes.filter { strikeFor(it, kind) }, kind.wire)
+        }
+    }
+
+    @Test
+    fun `the legacy call path keeps the desktop rule`() {
+        val codes = ConnectionErrorCodes.ALL + RpcErrorCodes.TIMEOUT + RpcErrorCodes.PLUGIN_ERROR
+        assertEquals(
+            listOf(RpcErrorCodes.TIMEOUT, RpcErrorCodes.PLUGIN_ERROR),
+            codes.filter { strikeFor(it, CallKind.Capability) },
+        )
     }
 
     @Test

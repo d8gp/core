@@ -101,9 +101,8 @@ class ManifestTest {
         assertTrue(hasPermission(granted.permissions, "contacts"))
     }
 
-    @Test
-    fun `accepts a messaging manifest with a full capabilities block`() {
-        val raw = base()
+    private fun messagingManifest(): JsonObject =
+        base()
             .with("id", JsonPrimitive("messaging-matrix"))
             .with("capabilities", buildJsonArray {
                 add(buildJsonObject {
@@ -128,7 +127,10 @@ class ManifestTest {
                     })
                 })
             })
-        val m = parseManifest(raw)
+
+    @Test
+    fun `accepts a messaging manifest with a full capabilities block`() {
+        val m = parseManifest(messagingManifest())
         val cap = m.capabilities[0] as MessagingCapabilityDecl
         assertEquals("messaging", cap.type)
         assertEquals("matrix", cap.protocol)
@@ -389,7 +391,7 @@ class ManifestTest {
 
     @Test
     fun `connector manifests match every shared vector`() {
-        val report = VectorReport("connector-manifests.json", 251)
+        val report = VectorReport("connector-manifests.json", 406)
         for (vector in connectorVectors) {
             val manifest = vector.getValue("manifest")
             val expect = vector.getValue("expect")
@@ -589,6 +591,48 @@ class ManifestTest {
                 }.message,
             )
         }
+    }
+
+    @Test
+    fun `a literal outside the json grammar is no number and no boolean anywhere in a manifest`() {
+        val text = ProtocolJson.encodeToString(JsonObject.serializer(), base())
+        fun errorOfText(from: String, to: String): String {
+            assertTrue(from in text, from)
+            return assertFailsWith<ManifestException>(to) { parseManifest(text.replace(from, to)) }.message!!
+        }
+
+        for (literal in listOf("01", "1.", "+1", "1d", "1f", ".1e1", "0x1", "NaN")) {
+            assertEquals(
+                "manifest.manifestVersion: must be 1",
+                errorOfText(""""manifestVersion":1,""", """"manifestVersion":$literal,"""),
+            )
+        }
+        for (literal in listOf("01", "4096d", "0x10", "NaN", "Infinity", "+4096")) {
+            assertEquals(
+                "manifest.entry.size: must be a non-negative number",
+                errorOfText(""""size":4096""", """"size":$literal"""),
+            )
+        }
+        for (literal in listOf("TRUE", "True", "tRuE", "FALSE", "False")) {
+            assertEquals(
+                "manifest.permissions.storage: must be a boolean",
+                errorOfText(""""storage":true""", """"storage":$literal"""),
+            )
+        }
+        assertEquals(1e400.toLong(), parseManifest(text.replace(""""size":4096""", """"size":1e400""")).entry.size)
+        assertEquals(1, parseManifest(text.replace(""""manifestVersion":1,""", """"manifestVersion":10e-1,""")).manifestVersion)
+    }
+
+    @Test
+    fun `a messaging flag outside the json grammar is no boolean`() {
+        val messaging = ProtocolJson.encodeToString(JsonObject.serializer(), messagingManifest())
+        assertTrue(""""canSend":true""" in messaging)
+        assertEquals(
+            "manifest.capabilities[0].capabilities.canSend: required boolean",
+            assertFailsWith<ManifestException> {
+                parseManifest(messaging.replace(""""canSend":true""", """"canSend":TRUE"""))
+            }.message,
+        )
     }
 
     @Test

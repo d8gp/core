@@ -1,10 +1,16 @@
 package com.d8gp.plugins.protocol
 
+import com.d8gp.plugins.protocol.connections.VectorReport
+import com.d8gp.plugins.protocol.connections.VectorsGenerated
+import com.d8gp.plugins.protocol.connections.text
+import com.d8gp.plugins.protocol.connections.textOrNull
+import com.d8gp.plugins.protocol.connections.vectorList
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -162,27 +168,27 @@ class ManifestTraitsTest {
     fun `network installs refuse reviewed privileges including running programs`() {
         assertNull(networkInstallRefusal(parseManifest(base())))
         assertEquals(
-            "asks to run programs on this device",
+            NetworkInstallRefusal.Exec,
             networkInstallRefusal(parseManifest(base().with("permissions", execPermission()))),
         )
         assertEquals(
-            "asks for the auth vault",
+            NetworkInstallRefusal.Auth,
             networkInstallRefusal(parseManifest(base().with("permissions", buildJsonObject { put("auth", true) }))),
         )
         assertEquals(
-            "asks for contacts",
+            NetworkInstallRefusal.Contacts,
             networkInstallRefusal(
                 parseManifest(base().with("permissions", buildJsonObject { put("contacts", true) })),
             ),
         )
         assertEquals(
-            "asks for unrestricted network",
+            NetworkInstallRefusal.WildcardNet,
             networkInstallRefusal(
                 parseManifest(base().with("permissions", buildJsonObject { put("net", buildJsonArray { add("*") }) })),
             ),
         )
         assertEquals(
-            "runs on the WebView substrate",
+            NetworkInstallRefusal.WebView,
             networkInstallRefusal(
                 parseManifest(
                     base().with(
@@ -195,5 +201,33 @@ class ManifestTraitsTest {
                 ),
             ),
         )
+    }
+    @Test
+    fun `install refusals match every shared vector`() {
+        val report = VectorReport("install-refusal.json", 31)
+        for (vector in vectorList(VectorsGenerated.INSTALL_REFUSAL)) {
+            val expect = vector.getValue("expect").jsonObject
+            report.check(vector.text("name"), expect.textOrNull("connector") to expect.textOrNull("network")) {
+                val manifest = parseManifest(vector.getValue("manifest"))
+                connectorInstallRefusal(manifest)?.code to networkInstallRefusal(manifest)?.code
+            }
+        }
+        report.finish()
+    }
+
+    @Test
+    fun `every refusal has its own code and a sentence for the user`() {
+        assertEquals(
+            listOf("llm-storage", "wildcard-net", "task-exec"),
+            ConnectorInstallRefusal.entries.map { it.code },
+        )
+        assertEquals(
+            listOf("webview", "auth", "contacts", "wildcard-net", "exec"),
+            NetworkInstallRefusal.entries.map { it.code },
+        )
+        val sentences = ConnectorInstallRefusal.entries.map { it.sentence } +
+            NetworkInstallRefusal.entries.map { it.sentence }
+        assertTrue(sentences.all { it.isNotBlank() })
+        assertEquals(sentences.size, sentences.distinct().size)
     }
 }

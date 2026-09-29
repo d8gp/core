@@ -55,6 +55,8 @@ object ConsentText {
     private const val GRANT_LABEL_WIDTH = 14
     private const val COMMAND_LINE_WIDTH = 96
     private const val KIBIBYTE = 1024L
+    private const val ELLIPSIS = "..."
+    const val MAX_SHOWN_UNITS = 512
     private val INDENT = " ".repeat(2 + LABEL_WIDTH)
 
     fun render(record: ConnectionRecord, graph: EgressGraph, context: ConsentContext): String {
@@ -115,9 +117,17 @@ object ConsentText {
         return lines.joinToString("\n")
     }
 
+    private fun shown(text: String): String = escaped(shownPart(text)) + cutNotice(text)
+
+    private fun shownPart(text: String): String = text.take(MAX_SHOWN_UNITS)
+
+    private fun cutNotice(text: String): String =
+        if (text.length > MAX_SHOWN_UNITS) "$ELLIPSIS (${text.length} characters)" else ""
+
     // A backslash is doubled so that text spelling an escape differs from a
-    // character that was escaped.
-    private fun shown(text: String): String = buildString {
+    // character that was escaped. A pair cut in half by shownPart leaves an
+    // unpaired surrogate, which is escaped like any other.
+    private fun escaped(text: String): String = buildString {
         text.forEachIndexed { i, unit ->
             when {
                 unit == '\\' -> append("\\\\")
@@ -133,7 +143,10 @@ object ConsentText {
         else -> false
     }
 
-    private fun quoted(text: String): String = "\"" + shown(text).replace("\"", "\\\"") + "\""
+    // The notice stands outside the quotation, so it cannot read as part of
+    // the value.
+    private fun quoted(text: String): String =
+        "\"" + escaped(shownPart(text)).replace("\"", "\\\"") + "\"" + cutNotice(text)
 
     // One argv element or enum value. Quoted when it is empty or holds a
     // space, so that one element can never read as two.

@@ -105,9 +105,10 @@ fun budgetExceededEnvelope(budget: String, callId: String? = null): JsonObject =
 )
 
 // The bridge rejects with a message only. First match wins; comparisons are
-// exact, case-sensitive and untrimmed.
+// exact, case-sensitive and untrimmed. The host's own timeout text is
+// "<method> timed out after <n>ms", so the two words are looked for anywhere.
 fun codeForBridgeRejection(message: String): String = when {
     "[not-found]" in message || message.startsWith("no handler for") -> ConnectionErrorCodes.UNAVAILABLE
-    message.endsWith("timed out") -> ConnectionErrorCodes.DEADLINE_EXCEEDED
+    "timed out" in message -> ConnectionErrorCodes.DEADLINE_EXCEEDED
     else -> ConnectionErrorCodes.PROVIDER_ERROR
 }

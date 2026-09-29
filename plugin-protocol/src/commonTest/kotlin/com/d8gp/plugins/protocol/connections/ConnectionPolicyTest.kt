@@ -4,6 +4,7 @@ import com.d8gp.plugins.protocol.ProtocolJson
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -16,7 +17,7 @@ import kotlin.test.assertTrue
 class ConnectionPolicyTest {
     @Test
     fun `matches every shared vector`() {
-        val report = VectorReport("policy.json", 79)
+        val report = VectorReport("policy.json", 103)
         for (vector in vectorList(VectorsGenerated.POLICY)) {
             val expect = vector.getValue("expect")
             val expected = if (expect is JsonObject) {
@@ -120,6 +121,47 @@ class ConnectionPolicyTest {
         assertIs<CallDecision.Deliver>(decide(record, call("d8gp.example.echo", 3, "echo")))
     }
 
+    private fun echoRecordWithMajor(major: String): ConnectionRecord {
+        val stored = vectorList(VectorsGenerated.POLICY).first { it.getValue("expect") !is JsonObject }
+            .getValue("record").jsonObject
+        val edited = stored + mapOf(
+            "interface" to JsonPrimitive("d8gp.example.echo"),
+            "methods" to parseJson("""["echo"]"""),
+            "major" to parseJson(major),
+        )
+        return ProtocolJson.decodeFromJsonElement(ConnectionRecord.serializer(), JsonObject(edited))
+    }
+
+    @Test
+    fun `a stored major is an integer by value`() {
+        for (major in listOf("1", "1.0", "1e0", "10e-1")) {
+            assertIs<CallDecision.Deliver>(
+                decide(echoRecordWithMajor(major), call("d8gp.example.echo", 1, "echo")),
+                major,
+            )
+        }
+    }
+
+    @Test
+    fun `a stored major that is not an integer of at least 1 matches no call`() {
+        for (major in listOf("\"1\"", "1.5", "0", "-1", "null", "true", "[1]", "1e400", "9007199254740992")) {
+            val record = echoRecordWithMajor(major)
+            assertEquals(ConnectionMajorSerializer.NOT_A_MAJOR, record.major, major)
+            assertEquals(
+                ConnectionErrorCodes.VERSION_MISMATCH,
+                refusal(record, call("d8gp.example.echo", 1, "echo")),
+                major,
+            )
+        }
+    }
+
+    @Test
+    fun `a major is stored as the number it is`() {
+        val record = echoRecordWithMajor("3")
+        val stored = ProtocolJson.encodeToJsonElement(ConnectionRecord.serializer(), record).jsonObject
+        assertEquals(JsonPrimitive(3), stored.getValue("major"))
+    }
+
     @Test
     fun `the deadline is never below one millisecond`() {
         for (maxCallMs in listOf(-5L, 0L, Long.MIN_VALUE)) {
@@ -157,7 +199,7 @@ class ConnectionPolicyTest {
 
     @Test
     fun `bridge rejections map to envelope codes`() {
-        val report = VectorReport("rejection-mapping.json", 34)
+        val report = VectorReport("rejection-mapping.json", 48)
         vectorList(VectorsGenerated.REJECTION_MAPPING).forEachIndexed { i, vector ->
             report.check("#$i <${vector.text("message")}>", vector.text("code")) {
                 codeForBridgeRejection(vector.text("message"))

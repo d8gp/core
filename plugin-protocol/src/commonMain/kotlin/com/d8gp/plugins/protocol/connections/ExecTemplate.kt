@@ -2,9 +2,12 @@ package com.d8gp.plugins.protocol.connections
 
 import com.d8gp.plugins.protocol.ExecArg
 import com.d8gp.plugins.protocol.ExecDecl
-import com.d8gp.plugins.protocol.ProtocolJson
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class ExecTemplateException(val code: String, val slot: String?) :
     Exception(if (slot == null) "exec slots: $code" else "exec slot $slot: $code") {
@@ -42,8 +45,31 @@ object ExecTemplate {
     // Named after the grant field it fills. It covers the WHOLE declaration
     // (purpose, stdin and the limits too), so a grant is void after any change
     // to what the user approved, not only to the argv.
-    fun argvDigest(decl: ExecDecl): String =
-        CanonicalJson.sha256Hex(ProtocolJson.encodeToJsonElement(ExecDecl.serializer(), decl))
+    fun argvDigest(decl: ExecDecl): String = Sha256.hexOfUtf8(argvDigestInput(decl))
+
+    // The exact text that is hashed. Every field is written here by name, so
+    // a field added to ExecDecl later changes no digest until it is added
+    // here too.
+    fun argvDigestInput(decl: ExecDecl): String = CanonicalJson.encode(
+        buildJsonObject {
+            put("binary", decl.binary)
+            put("purpose", decl.purpose)
+            put("argv", JsonArray(decl.argv.map(::digestedArg)))
+            decl.stdin?.let { put("stdin", buildJsonObject { put("maxBytes", it.maxBytes) }) }
+            decl.timeoutMs?.let { put("timeoutMs", it) }
+            decl.maxStdoutBytes?.let { put("maxStdoutBytes", it) }
+        },
+    )
+
+    private fun digestedArg(arg: ExecArg): JsonElement = when (arg) {
+        is ExecArg.Literal -> JsonPrimitive(arg.value)
+        is ExecArg.Slot -> buildJsonObject {
+            put("flag", arg.flag)
+            put("slot", arg.slot)
+            arg.enum?.let { values -> put("enum", JsonArray(values.map(::JsonPrimitive))) }
+            arg.maxBytes?.let { put("maxBytes", it) }
+        }
+    }
 
     private fun slotValue(arg: ExecArg.Slot, slots: JsonObject): String {
         fun fail(code: String): Nothing = throw ExecTemplateException(code, arg.slot)

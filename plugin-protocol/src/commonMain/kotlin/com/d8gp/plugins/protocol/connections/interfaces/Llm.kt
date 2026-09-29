@@ -18,6 +18,16 @@ object LlmStopReasons {
     const val RATE_LIMITED = "rate_limited"
     const val PROVIDER_ERROR = "provider_error"
     const val UNAVAILABLE = "unavailable"
+
+    val ALL: Set<String> = setOf(
+        END,
+        MAX_TOKENS,
+        REFUSAL,
+        INVALID_OUTPUT,
+        RATE_LIMITED,
+        PROVIDER_ERROR,
+        UNAVAILABLE,
+    )
 }
 
 @Serializable

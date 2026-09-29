@@ -38,7 +38,7 @@ object SchemaSubset {
         val bytes = try {
             utf8Length(CanonicalJson.encode(schema))
         } catch (_: CanonicalJsonException) {
-            return RULE_BYTES
+            return RULE_SCHEMA
         }
         return if (bytes > MAX_BYTES) RULE_BYTES else null
     }

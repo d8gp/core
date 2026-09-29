@@ -10,7 +10,3 @@ internal actual fun parseSchemeAndHost(rawUrl: String): Pair<String, String>? {
     val host = url.host
     return if (host.isNullOrEmpty()) null else scheme to host.lowercase()
 }
-
-internal actual fun parseScheme(rawUrl: String): String? = NSURL.URLWithString(rawUrl)?.scheme
-
-internal actual fun parseStrictHost(rawUrl: String): String? = NSURL.URLWithString(rawUrl)?.host

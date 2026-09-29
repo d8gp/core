@@ -13,6 +13,8 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
@@ -197,6 +199,23 @@ data class ConnectionTransition(
     val by: String,
 )
 
+// kotlinx reads the string "1" as the number 1 and refuses 1.0. A major that
+// is not an integer of at least 1 is read as NOT_A_MAJOR, which no call and
+// no declaration can equal.
+object ConnectionMajorSerializer : KSerializer<Long> {
+    const val NOT_A_MAJOR = -1L
+
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("com.d8gp.plugins.protocol.connections.ConnectionMajor", PrimitiveKind.LONG)
+
+    override fun serialize(encoder: Encoder, value: Long) = encoder.encodeLong(value)
+
+    override fun deserialize(decoder: Decoder): Long {
+        val input = decoder as? JsonDecoder ?: throw SerializationException("a major is read from JSON only")
+        return input.decodeJsonElement().integerIn(1..MAX_SAFE_INTEGER) ?: NOT_A_MAJOR
+    }
+}
+
 @Serializable
 data class ConnectionRecord(
     val id: String,
@@ -204,6 +223,7 @@ data class ConnectionRecord(
     val provider: ConnectionProvider,
     @SerialName("interface")
     val iface: String,
+    @Serializable(with = ConnectionMajorSerializer::class)
     val major: Long,
     val methods: List<String>,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)

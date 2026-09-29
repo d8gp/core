@@ -15,7 +15,7 @@ class SchemaSubsetTest {
 
     @Test
     fun `dialect check matches every shared vector`() {
-        val report = VectorReport("schema-subset.json dialect", 104)
+        val report = VectorReport("schema-subset.json dialect", 111)
         for (vector in file.getValue("dialect").jsonArray.map { it.jsonObject }) {
             val expect = vector.getValue("expect")
             val expected = if (expect is JsonObject) expect.text("reject") else null

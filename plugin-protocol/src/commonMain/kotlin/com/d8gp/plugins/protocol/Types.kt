@@ -2,19 +2,104 @@
 
 package com.d8gp.plugins.protocol
 
+import com.d8gp.plugins.protocol.connections.isConsentSafe
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonContentPolymorphicSerializer
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 // Kotlin twin of plugin-host-core/types.ts — JSON field names are the wire
 // format shared with the RN host and plugin bundles, verbatim.
+
+internal const val CONSENT_TEXT_FLAW = "must not contain control, invisible or line break characters"
+
+// Both are printed by the exec consent dialog, so both are consent text.
+internal fun isExecLiteral(text: String): Boolean = isConsentSafe(text)
+
+internal fun isExecEnumValue(text: String): Boolean = text.isNotEmpty() && isConsentSafe(text)
+
+// The host renders a Slot as the single argv element "<flag>=<value>", so a
+// plugin-supplied value can never become a flag of its own.
+//
+// The serializer is a second way into these classes that skips parseManifest,
+// so the rules that decide what may reach an argv are enforced on
+// construction and an instance that breaks them cannot exist.
+@Serializable(with = ExecArgSerializer::class)
+sealed class ExecArg {
+    @Serializable(with = ExecLiteralSerializer::class)
+    data class Literal(val value: String) : ExecArg() {
+        init {
+            require(isExecLiteral(value)) { "exec argv literal $CONSENT_TEXT_FLAW" }
+        }
+    }
+
+    @Serializable
+    data class Slot(
+        val flag: String,
+        val slot: String,
+        val enum: List<String>? = null,
+        val maxBytes: Int? = null,
+    ) : ExecArg() {
+        init {
+            require(EXEC_FLAG_RE.matches(flag)) { "exec slot flag must match ^${EXEC_FLAG_RE.pattern}$" }
+            require(EXEC_SLOT_RE.matches(slot)) { "exec slot name must match ^${EXEC_SLOT_RE.pattern}$" }
+            require(enum == null || enum.all(::isExecEnumValue)) {
+                "exec slot enum values must be non-empty and each $CONSENT_TEXT_FLAW"
+            }
+        }
+    }
+}
+
+object ExecLiteralSerializer : KSerializer<ExecArg.Literal> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("com.d8gp.plugins.protocol.ExecArg.Literal", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: ExecArg.Literal) = encoder.encodeString(value.value)
+
+    override fun deserialize(decoder: Decoder): ExecArg.Literal = ExecArg.Literal(decoder.decodeString())
+}
+
+object ExecArgSerializer : JsonContentPolymorphicSerializer<ExecArg>(ExecArg::class) {
+    override fun selectDeserializer(element: JsonElement): DeserializationStrategy<ExecArg> = when {
+        element is JsonPrimitive && element.isString -> ExecArg.Literal.serializer()
+        element is JsonObject -> ExecArg.Slot.serializer()
+        else -> throw SerializationException("exec argv element must be a string or a slot object")
+    }
+}
+
+@Serializable
+data class ExecStdin(
+    val maxBytes: Int,
+)
+
+@Serializable
+data class ExecDecl(
+    val binary: String, // a NAME, never a path; the user supplies the path at grant time
+    val purpose: String,
+    val argv: List<ExecArg>,
+    val stdin: ExecStdin? = null,
+    val timeoutMs: Long? = null,
+    val maxStdoutBytes: Long? = null,
+) {
+    init {
+        require(EXEC_BINARY_RE.matches(binary)) { "exec binary must match ^${EXEC_BINARY_RE.pattern}$" }
+    }
+}
 
 @Serializable
 data class PluginPermissions(
@@ -27,6 +112,9 @@ data class PluginPermissions(
     // Read access to the host's d8gp contacts (contacts.lookup / contacts.list).
     // Additive: absent in old manifests, ignored by hosts that predate it.
     val contacts: Boolean? = null,
+    // Declares programs the plugin may ask the host to run. A declaration
+    // grants nothing: each binary needs its own sealed, user-approved grant.
+    val exec: List<ExecDecl>? = null,
 )
 
 @Serializable
@@ -87,12 +175,34 @@ data class LibraryCapabilityDecl(
     val origins: List<String>? = null,
 ) : CapabilityDecl()
 
+@Serializable
+enum class ConnectorRole {
+    @SerialName("provides") Provides,
+    @SerialName("requires") Requires,
+}
+
+@Serializable
+data class ConnectorCapabilityDecl(
+    @EncodeDefault(EncodeDefault.Mode.ALWAYS)
+    override val type: String = "connector",
+    val role: ConnectorRole,
+    @SerialName("interface")
+    val iface: String,
+    val version: Long,
+    val methods: List<String>,
+    val name: String,
+    val icon: String? = null,
+    val reason: String? = null,
+    val egress: List<String>? = null, // hostnames and "exec:<binary>"
+) : CapabilityDecl()
+
 object CapabilityDeclSerializer : JsonContentPolymorphicSerializer<CapabilityDecl>(CapabilityDecl::class) {
     override fun selectDeserializer(element: JsonElement): DeserializationStrategy<CapabilityDecl> =
         when (val type = element.jsonObject["type"]?.jsonPrimitive?.content) {
             "feed" -> FeedCapabilityDecl.serializer()
             "messaging" -> MessagingCapabilityDecl.serializer()
             "library" -> LibraryCapabilityDecl.serializer()
+            "connector" -> ConnectorCapabilityDecl.serializer()
             else -> throw SerializationException("unknown capability type: $type")
         }
 }

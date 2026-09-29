@@ -1,6 +1,8 @@
 package com.d8gp.plugins.protocol
 
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.Test
 
@@ -88,5 +90,17 @@ class PermissionsTest {
         assertTrue(hasPermission(PluginPermissions(contacts = true), "contacts"))
         assertFalse(hasPermission(PluginPermissions(contacts = false), "contacts"))
         assertFalse(hasPermission(PluginPermissions(), "contacts"))
+    }
+
+    @Test
+    fun `execDeclFor finds a declared program by exact name only`() {
+        val claude = ExecDecl(binary = "claude", purpose = "Runs a helper program.", argv = emptyList())
+        val permissions = PluginPermissions(exec = listOf(claude))
+
+        assertEquals(claude, execDeclFor(permissions, "claude"))
+        assertNull(execDeclFor(permissions, "Claude"))
+        assertNull(execDeclFor(permissions, "claude "))
+        assertNull(execDeclFor(PluginPermissions(), "claude"))
+        assertFalse(hasPermission(permissions, "exec"))
     }
 }

@@ -1,14 +1,23 @@
 package com.d8gp.plugins.protocol
 
+import com.d8gp.plugins.protocol.connections.VectorReport
+import com.d8gp.plugins.protocol.connections.VectorsGenerated
+import com.d8gp.plugins.protocol.connections.text
+import com.d8gp.plugins.protocol.connections.vectorList
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -216,7 +225,7 @@ class ManifestTest {
             errorOf(base().with("capabilities", buildJsonArray {})),
         )
         assertEquals(
-            "manifest.capabilities[0].type: must be one of feed, messaging, library",
+            "manifest.capabilities[0].type: must be one of feed, messaging, library, connector",
             errorOf(base().with("capabilities", buildJsonArray {
                 add(buildJsonObject { put("type", "wormhole") })
             })),
@@ -363,5 +372,235 @@ class ManifestTest {
             assertEquals("manifest.: must be a JSON object", e.message)
         }
         assertFalse(isValidManifest("not json"))
+    }
+
+    private val connectorVectors = vectorList(VectorsGenerated.CONNECTOR_MANIFESTS)
+
+    private fun connectorManifest(name: String): JsonObject =
+        connectorVectors.first { it.text("name") == name }.getValue("manifest").jsonObject
+
+    private fun JsonObject.withCapability(change: (JsonObject) -> JsonObject): JsonObject =
+        with("capabilities", buildJsonArray { add(change(getValue("capabilities").jsonArray[0].jsonObject)) })
+
+    private fun errorPathOf(json: JsonElement): String =
+        errorOf(json).removePrefix("manifest.").substringBefore(": ")
+
+    private fun strings(json: JsonElement): List<String> = json.jsonArray.map { it.jsonPrimitive.content }
+
+    @Test
+    fun `connector manifests match every shared vector`() {
+        val report = VectorReport("connector-manifests.json", 251)
+        for (vector in connectorVectors) {
+            val manifest = vector.getValue("manifest")
+            val expect = vector.getValue("expect")
+            if (expect is JsonObject) {
+                report.check(vector.text("name"), "rejects at <${expect.text("errorPath")}>") {
+                    try {
+                        parseManifest(manifest)
+                        "parses"
+                    } catch (e: ManifestException) {
+                        "rejects at <${e.message!!.removePrefix("manifest.").substringBefore(": ")}>"
+                    }
+                }
+                continue
+            }
+            val parsed = vector.getValue("parsed").jsonObject
+            report.check(
+                vector.text("name"),
+                strings(parsed.getValue("capabilityTypes")) to strings(parsed.getValue("execBinaries")),
+            ) {
+                val result = parseManifest(manifest)
+                result.capabilities.map { it.type } to result.permissions.exec.orEmpty().map { it.binary }
+            }
+        }
+        report.finish()
+    }
+
+    @Test
+    fun `every accepted connector manifest survives the serializer round trip`() {
+        val accepted = connectorVectors.filter { it.getValue("expect") !is JsonObject }
+        assertTrue(accepted.size > 30)
+        for (vector in accepted) {
+            val parsed = parseManifest(vector.getValue("manifest"))
+            val wire = ProtocolJson.encodeToString(PluginManifest.serializer(), parsed)
+            assertEquals(parsed, ProtocolJson.decodeFromString(PluginManifest.serializer(), wire), vector.text("name"))
+            assertEquals(parsed, parseManifest(wire), vector.text("name"))
+        }
+    }
+
+    @Test
+    fun `a connector never parses as a library capability`() {
+        val manifest = parseManifest(connectorManifest("ok/library-beside-connector-keeps-both-types"))
+        assertIs<ConnectorCapabilityDecl>(manifest.capabilities[0])
+        assertIs<LibraryCapabilityDecl>(manifest.capabilities[1])
+
+        val decoded = ProtocolJson.decodeFromString(
+            CapabilityDecl.serializer(),
+            """{"type":"connector","role":"requires","interface":"d8gp.llm","version":1,
+                "methods":["complete"],"name":"Language model","reason":"Asks a model."}""",
+        )
+        assertEquals(
+            ConnectorCapabilityDecl(
+                role = ConnectorRole.Requires,
+                iface = "d8gp.llm",
+                version = 1,
+                methods = listOf("complete"),
+                name = "Language model",
+                reason = "Asks a model.",
+            ),
+            decoded,
+        )
+    }
+
+    @Test
+    fun `the interface is written under its wire name`() {
+        val decl = ConnectorCapabilityDecl(
+            role = ConnectorRole.Provides,
+            iface = "d8gp.llm",
+            version = 1,
+            methods = listOf("complete"),
+            name = "Model",
+            egress = emptyList(),
+        )
+        assertEquals(
+            """{"type":"connector","role":"provides","interface":"d8gp.llm","version":1,""" +
+                """"methods":["complete"],"name":"Model","egress":[]}""",
+            ProtocolJson.encodeToString(CapabilityDecl.serializer(), decl),
+        )
+    }
+
+    @Test
+    fun `an unknown capability type is refused by the validator and by the serializer`() {
+        val job = connectorManifest("ok/consumer").withCapability { JsonObject(it + ("type" to JsonPrimitive("job"))) }
+        assertEquals(
+            "manifest.capabilities[0].type: must be one of feed, messaging, library, connector",
+            errorOf(job),
+        )
+        assertFailsWith<Exception> { ProtocolJson.decodeFromJsonElement(PluginManifest.serializer(), job) }
+    }
+
+    @Test
+    fun `plugin id host is reserved and host principals can never be plugin ids`() {
+        val consumer = connectorManifest("ok/consumer")
+        assertEquals("manifest.id: is reserved for the host", errorOf(consumer.with("id", JsonPrimitive("host"))))
+        for (principal in listOf("host:daemon", "host:ui", "host:messages", "host:fixture")) {
+            assertEquals("id", errorPathOf(consumer.with("id", JsonPrimitive(principal))), principal)
+        }
+        assertTrue(isValidManifest(consumer.with("id", JsonPrimitive("hosted-tools"))))
+    }
+
+    @Test
+    fun `exec template is parsed into literals and slots and written back unchanged`() {
+        val source = connectorManifest("ok/plugin-llm-claude-cli-design-section-1.2")
+        val exec = parseManifest(source).permissions.exec!!.single()
+
+        assertEquals("claude", exec.binary)
+        assertEquals(ExecArg.Literal("-p"), exec.argv[0])
+        assertEquals(
+            ExecArg.Slot(flag = "--model", slot = "model", enum = listOf("haiku", "sonnet", "opus")),
+            exec.argv[2],
+        )
+        assertEquals(ExecArg.Slot(flag = "--system-prompt", slot = "system", maxBytes = 32768), exec.argv[3])
+        assertEquals(ExecArg.Literal("--tools="), exec.argv.last())
+        assertEquals(ExecStdin(maxBytes = 524288), exec.stdin)
+
+        assertEquals(
+            source.getValue("permissions").jsonObject.getValue("exec").jsonArray[0],
+            ProtocolJson.encodeToJsonElement(ExecDecl.serializer(), exec),
+        )
+    }
+
+    @Test
+    fun `exec declares a program name and never a path`() {
+        val source = connectorManifest("ok/plugin-llm-claude-cli-design-section-1.2")
+        val entry = source.getValue("permissions").jsonObject.getValue("exec").jsonArray[0].jsonObject
+        for (binary in listOf("../sh", "/bin/sh", "bin/sh", "sh;id", "")) {
+            val permissions = buildJsonObject {
+                put("exec", buildJsonArray { add(JsonObject(entry + ("binary" to JsonPrimitive(binary)))) })
+            }
+            assertEquals(
+                "permissions.exec[0].binary",
+                errorPathOf(source.with("permissions", permissions)),
+                binary,
+            )
+        }
+    }
+
+    @Test
+    fun `egress is a covered hostname or a declared program and never prose`() {
+        val provider = connectorManifest("ok/provider-anthropic-api")
+        fun withEgress(entry: String) = provider.withCapability {
+            JsonObject(it + ("egress" to buildJsonArray { add(entry) }))
+        }
+        assertTrue(isValidManifest(withEgress("api.anthropic.com")))
+        for (entry in listOf(
+            "sends data to Anthropic",
+            "https://api.anthropic.com",
+            "api.anthropic.com:443",
+            "*.anthropic.com",
+            "API.anthropic.com",
+            "evil.example",
+            "exec:claude",
+        )) {
+            assertEquals("capabilities[0].egress[0]", errorPathOf(withEgress(entry)), entry)
+        }
+    }
+
+    @Test
+    fun `control characters newlines and escape are refused in consent text`() {
+        val consumer = connectorManifest("ok/consumer")
+        val hostile = listOf(
+            "line\nbreak",
+            "carriage\rreturn",
+            "tab\there",
+            "esc\u001b[31mred",
+            "nul\u0000",
+            "del\u007f",
+        )
+        for (text in hostile) {
+            for (field in listOf("name", "reason")) {
+                assertEquals(
+                    "capabilities[0].$field",
+                    errorPathOf(consumer.withCapability { JsonObject(it + (field to JsonPrimitive(text))) }),
+                    "$field <$text>",
+                )
+            }
+        }
+
+        val cli = connectorManifest("ok/plugin-llm-claude-cli-design-section-1.2")
+        val entry = cli.getValue("permissions").jsonObject.getValue("exec").jsonArray[0].jsonObject
+        for (text in hostile) {
+            val permissions = buildJsonObject {
+                put("exec", buildJsonArray { add(JsonObject(entry + ("purpose" to JsonPrimitive(text)))) })
+            }
+            assertEquals("permissions.exec[0].purpose", errorPathOf(cli.with("permissions", permissions)), text)
+        }
+    }
+
+    @Test
+    fun `a literal outside the json number grammar is no integer`() {
+        val consumer = ProtocolJson.encodeToString(JsonObject.serializer(), connectorManifest("ok/consumer"))
+        assertTrue(""""version":1,""" in consumer)
+        for (literal in listOf("1d", "1f", "0x1p0", "01", "+1", "1.", "NaN")) {
+            assertEquals(
+                "manifest.capabilities[0].version: must be an integer of at least 1",
+                assertFailsWith<ManifestException>(literal) {
+                    parseManifest(consumer.replace(""""version":1,""", """"version":$literal,"""))
+                }.message,
+            )
+        }
+    }
+
+    @Test
+    fun `an exec entry that reaches a manifest through the serializer obeys the validator`() {
+        val cli = connectorManifest("ok/plugin-llm-claude-cli-design-section-1.2")
+        val text = ProtocolJson.encodeToString(JsonObject.serializer(), cli)
+        assertEquals("claude", ProtocolJson.decodeFromString(PluginManifest.serializer(), text).permissions.exec!![0].binary)
+        assertFailsWith<IllegalArgumentException> {
+            ProtocolJson.decodeFromString(
+                PluginManifest.serializer(),
+                text.replace(""""binary":"claude"""", """"binary":"../../bin/sh""""),
+            )
+        }
     }
 }

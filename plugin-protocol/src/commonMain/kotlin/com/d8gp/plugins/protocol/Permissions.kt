@@ -39,3 +39,6 @@ fun hasPermission(permissions: PluginPermissions, key: String): Boolean = when (
     else -> false
 }
 
+// A declaration is not a grant.
+fun execDeclFor(permissions: PluginPermissions, binary: String): ExecDecl? =
+    permissions.exec?.firstOrNull { it.binary == binary }

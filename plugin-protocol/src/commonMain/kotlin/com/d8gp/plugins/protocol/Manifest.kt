@@ -25,6 +25,9 @@ private val SHA256_RE = Regex("^[0-9a-f]{64}$")
 private val CAPABILITY_TYPES = listOf("feed", "messaging", "library", "connector")
 private const val RESERVED_HOST_ID = "host"
 
+/** The id grammar on its own, for a host that receives an id before it has a manifest to validate. */
+fun isPluginId(id: String): Boolean = ID_RE.matches(id) && id != RESERVED_HOST_ID
+
 val CONNECTOR_INTERFACE_RE = Regex("[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*){1,3}")
 val CONNECTOR_METHOD_RE = Regex("[a-z][a-zA-Z0-9]{0,31}")
 internal val EXEC_BINARY_RE = Regex("[a-z0-9][a-z0-9._-]{0,31}")

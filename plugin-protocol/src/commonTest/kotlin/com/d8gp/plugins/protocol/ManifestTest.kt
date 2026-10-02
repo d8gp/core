@@ -668,4 +668,11 @@ class ManifestTest {
             )
         }
     }
+
+    @Test
+    fun `the id predicate accepts what the validator accepts and nothing path-shaped`() {
+        for (id in listOf("plugin-events", "abc", "a.b_c-d", "0day")) assertTrue(isPluginId(id), id)
+        val refused = listOf("", "ab", "host", "Plugin", "../outside/evil", "plugin/x", ".hidden", "-dash", "a".repeat(65), "plugin x")
+        for (id in refused) assertFalse(isPluginId(id), id)
+    }
 }

@@ -67,6 +67,12 @@ data class Settlement(
     val providerTokensToday: Long,
 )
 
+// What one connection or one provider used on one UTC day, as a host stored it.
+data class DayUsage(
+    val requests: Long,
+    val tokens: Long,
+)
+
 // Not thread-safe: the broker admits and settles from one serialized context.
 // maxConcurrent is enforced by the broker's queue, not here.
 class BudgetMeter(private val nowMs: () -> Long) {
@@ -185,6 +191,23 @@ class BudgetMeter(private val nowMs: () -> Long) {
             providerTokensToday = provider.settledTokens,
         )
     }
+
+    // Carries the counters a host stored over a restart, so a daily limit
+    // holds across runs of the host. A stored count never lowers what this
+    // meter already counted, and a count that is not a count is read as the
+    // top of the range, which admits nothing more that day.
+    fun restore(day: Long, connections: Map<String, DayUsage>, providers: Map<String, DayUsage>) {
+        for ((connection, usage) in connections) restoreInto(connectionDays, connection to day, usage)
+        for ((provider, usage) in providers) restoreInto(providerDays, provider to day, usage)
+    }
+
+    private fun restoreInto(days: MutableMap<Pair<String, Long>, DayCounters>, key: Pair<String, Long>, usage: DayUsage) {
+        val counters = days.getOrPut(key) { DayCounters() }
+        counters.requests = maxOf(counters.requests, storedCount(usage.requests))
+        counters.settledTokens = maxOf(counters.settledTokens, storedCount(usage.tokens))
+    }
+
+    private fun storedCount(value: Long): Long = if (isCount(value)) value else MAX_SAFE_INTEGER
 
     // Counters of earlier days can never be charged again once their calls
     // have settled.

@@ -244,6 +244,21 @@ class BudgetMeterTest {
     }
 
     @Test
+    fun `a call settled with a report of nothing is charged its byte estimate, and its request still counts`() {
+        val meter = BudgetMeter { 0 }
+        val budget = Budget(tokensPerDay = 9_000)
+        assertIs<Admission.Admitted>(meter.admit(request("undelivered", maxTokens = 8_000, requestBytes = 300), budget))
+
+        val settlement = meter.settle("undelivered", TokenUsage(inputTokens = 0, outputTokens = 0))
+
+        assertEquals(100, settlement.chargedTokens)
+        assertEquals(100, settlement.tokensToday)
+        assertEquals(1, settlement.requestsToday)
+        // Charged in full, the first call would have left no room for a second of the same size.
+        assertIs<Admission.Admitted>(meter.admit(request("next", maxTokens = 8_000, requestBytes = 300), budget))
+    }
+
+    @Test
     fun `earlier days are forgotten once their calls have settled`() {
         var now = 0L
         val meter = BudgetMeter { now }
@@ -262,5 +277,53 @@ class BudgetMeterTest {
         // The clock is held at day 1 to see that its counters are gone.
         meter.forgetDaysBefore(2)
         assertIs<Admission.Admitted>(meter.admit(request("again"), budget))
+    }
+
+    @Test
+    fun `stored counters hold the daily limits across a restart`() {
+        val budget = Budget(requestsPerDay = 3, tokensPerDay = 1_000)
+        val cap = ProviderCap(requestsPerDay = 5, tokensPerDay = 10_000)
+        val restarted = BudgetMeter { 0 }
+        restarted.restore(
+            day = 0,
+            connections = mapOf("cn_a" to DayUsage(requests = 2, tokens = 400)),
+            providers = mapOf(provider to DayUsage(requests = 4, tokens = 400)),
+        )
+
+        assertIs<Admission.Admitted>(restarted.admit(request("c3", maxTokens = 100, requestBytes = 30), budget, cap))
+        val settlement = restarted.settle("c3", TokenUsage(40, 60))
+        assertEquals(3, settlement.requestsToday)
+        assertEquals(500, settlement.tokensToday)
+        assertEquals(5, settlement.providerRequestsToday)
+        assertEquals(
+            Admission.Refused(BudgetDetails.REQUESTS_PER_DAY),
+            restarted.admit(request("c4", maxTokens = 100, requestBytes = 30), budget, cap),
+        )
+    }
+
+    @Test
+    fun `a stored day does not leak into the next day and never lowers a count`() {
+        var now = 0L
+        val meter = BudgetMeter { now }
+        val budget = Budget(requestsPerDay = 2)
+        assertIs<Admission.Admitted>(meter.admit(request("c1"), budget))
+        meter.settle("c1", null)
+        assertIs<Admission.Admitted>(meter.admit(request("c2"), budget))
+        meter.settle("c2", null)
+
+        meter.restore(day = 0, connections = mapOf("cn_a" to DayUsage(requests = 0, tokens = 0)), providers = emptyMap())
+        assertEquals(Admission.Refused(BudgetDetails.REQUESTS_PER_DAY), meter.admit(request("c3"), budget))
+
+        now = 86_400_000L
+        assertIs<Admission.Admitted>(meter.admit(request("c3"), budget))
+    }
+
+    @Test
+    fun `a stored count that is not a count admits nothing more that day`() {
+        for (stored in listOf(DayUsage(-1, 0), DayUsage(0, -1), DayUsage(Long.MAX_VALUE, 0))) {
+            val meter = BudgetMeter { 0 }
+            meter.restore(day = 0, connections = mapOf("cn_a" to stored), providers = emptyMap())
+            assertIs<Admission.Refused>(meter.admit(request("c1"), Budget()), stored.toString())
+        }
     }
 }

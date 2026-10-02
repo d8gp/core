@@ -129,6 +129,19 @@ This approval covers exactly this version of the plugin.
     }
 
     @Test
+    fun `a declared program is described outside the dialog in the dialog's own words`() {
+        val dialog = ConsentText.renderExecGrant(grant).lines()
+        val commandLine = ConsentText.execCommandLine(grant.decl)
+
+        assertEquals(3, commandLine.size)
+        assertEquals(
+            dialog.dropWhile { !it.startsWith("Command line") }.take(commandLine.size).map { it.drop("Command line  ".length) },
+            commandLine,
+        )
+        assertTrue("The plugin fills in: ${ConsentText.execFillIns(grant.decl)}." in dialog)
+    }
+
+    @Test
     fun `consent names both plugins the interface the budget and both egress sets`() {
         val anthropic = record.copy(
             provider = record.provider.copy(

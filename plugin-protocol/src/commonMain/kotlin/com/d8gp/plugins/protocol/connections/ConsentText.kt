@@ -92,7 +92,6 @@ object ConsentText {
 
     fun renderExecGrant(request: ExecGrantRequest): String {
         val decl = request.decl
-        val slots = decl.argv.filterIsInstance<ExecArg.Slot>()
         val lines = mutableListOf<String>()
 
         lines += "Allow ${quoted(request.pluginName)} (${party(request.pluginId, request.pluginVersion)}) " +
@@ -103,10 +102,10 @@ object ConsentText {
             lines += grantField("", "-> ${shown(request.resolvedPath)}")
         }
         lines += grantField("Signed by", signerText(request))
-        commandLine(decl).forEachIndexed { i, line ->
+        execCommandLine(decl).forEachIndexed { i, line ->
             lines += grantField(if (i == 0) "Command line" else "", line)
         }
-        lines += "The plugin fills in: ${fillIns(slots, decl)}."
+        lines += "The plugin fills in: ${execFillIns(decl)}."
         lines += "Lockdown check: ${request.lockdownCheck?.let(::shown) ?: "not available for this program"}."
         lines += ""
         lines += "This program runs as you, outside the sandbox. It can read your files and use the network."
@@ -294,7 +293,12 @@ object ConsentText {
         }
     }
 
-    private fun commandLine(decl: ExecDecl): List<String> {
+    /**
+     * The command line [decl] declares, word for word as the grant dialog
+     * shows it, for a host that lists a declared program before any grant is
+     * proposed.
+     */
+    fun execCommandLine(decl: ExecDecl): List<String> {
         val words = listOf(shown(decl.binary)) + decl.argv.map { arg ->
             when (arg) {
                 is ExecArg.Literal -> word(arg.value)
@@ -317,7 +321,9 @@ object ConsentText {
         return lines
     }
 
-    private fun fillIns(slots: List<ExecArg.Slot>, decl: ExecDecl): String {
+    /** What the plugin supplies on each run of [decl], as the grant dialog words it. */
+    fun execFillIns(decl: ExecDecl): String {
+        val slots = decl.argv.filterIsInstance<ExecArg.Slot>()
         val parts = slots.map { "${shown(it.slot)} (${it.enum?.map(::word)?.let(::alternatives) ?: "text"})" }
         val input = "the program's input".takeIf { decl.stdin != null }
         return when {
